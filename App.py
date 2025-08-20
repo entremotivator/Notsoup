@@ -442,7 +442,7 @@ def main():
             st.error("🔴 Supabase Disconnected")
         
         # WordPress status
-        if manager.authenticated_user:
+        if manager.authenticated_user and isinstance(manager.authenticated_user, dict):
             st.success("🟢 WordPress Authenticated")
             st.json({
                 'user': manager.authenticated_user.get('user_name', 'Unknown'),
@@ -453,16 +453,21 @@ def main():
             st.error("🔴 WordPress Not Authenticated")
         
         # Quick actions
-        if manager.authenticated_user:
+        if manager.authenticated_user and isinstance(manager.authenticated_user, dict):
             st.markdown("---")
             st.header("⚡ Quick Actions")
             
             if st.button("🔄 Refresh Data"):
                 if manager.wp_base_url and manager.consumer_secret:
-                    result = manager.authenticate_wordpress(manager.wp_base_url, manager.consumer_secret)
-                    if result['success']:
-                        st.success("✅ Data refreshed")
-                        st.rerun()
+                    with st.spinner("🔄 Refreshing..."):
+                        result = manager.authenticate_wordpress(manager.wp_base_url, manager.consumer_secret)
+                        if result['success']:
+                            if manager.supabase_client:
+                                manager.sync_user_to_supabase(result['data'])
+                            st.success("✅ Data refreshed and synced")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Refresh failed: {result['message']}")
             
             if st.button("🚪 Logout"):
                 manager.authenticated_user = None
