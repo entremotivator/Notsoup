@@ -159,20 +159,20 @@ class WordPressAuthManager:
         self.api_url = api_url
         self.admin_users = ["admin", "superadmin", "donmenico"]  # Admin whitelist
     
-    def check_subscription(self, username: str, consumer_secret: str) -> Tuple[bool, Dict[str, Any]]:
+    def check_subscription(self, username: str, password: str) -> Tuple[bool, Dict[str, Any]]:
         """Check if user has an active subscription or is admin"""
         try:
             # Method 1: Query parameter authentication
             response = requests.get(
                 self.api_url,
-                params={"consumer_secret": consumer_secret, "username": username},
+                params={"password": password, "username": username},
                 timeout=15
             )
             
             # Method 2: Authorization header if first method fails
             if response.status_code == 401:
                 headers = {
-                    "Authorization": f"Bearer {consumer_secret}",
+                    "Authorization": f"Bearer {password}",
                     "Content-Type": "application/json"
                 }
                 response = requests.get(
@@ -185,7 +185,7 @@ class WordPressAuthManager:
             # Method 3: Custom header if second method fails
             if response.status_code == 401:
                 headers = {
-                    "X-Consumer-Secret": consumer_secret,
+                    "X-WP-Password": password,
                     "Content-Type": "application/json"
                 }
                 response = requests.get(
@@ -650,30 +650,30 @@ def render_wordpress_auth(wp_auth: WordPressAuthManager):
             
             with col1:
                 username = st.text_input("WordPress Username", key="wp_username")
-                consumer_secret = st.text_input("Consumer Secret", type="password", key="wp_secret")
+                password = st.text_input("WordPress Password", type="password", key="wp_password")
             
             with col2:
                 st.info("""
                 **Access Requirements:**
                 - Active subscription on AiPropIQ
                 - Valid WordPress credentials
-                - Consumer secret from your account
+                - WordPress username and password
                 """)
             
             submit_signin = st.form_submit_button("🚀 Sign In", type="primary")
             
             if submit_signin:
-                if not username or not consumer_secret:
+                if not username or not password:
                     st.error("Please fill in all fields.")
                 else:
                     with st.spinner("Authenticating with WordPress..."):
-                        valid, result = wp_auth.check_subscription(username, consumer_secret)
+                        valid, result = wp_auth.check_subscription(username, password)
                         
                         if valid:
                             st.session_state.authenticated = True
                             st.session_state.user_data = result
                             st.session_state.username = username
-                            st.session_state.consumer_secret = consumer_secret
+                            st.session_state.password = password
                             
                             # Set usage limits based on role
                             if result.get("role") == "admin":
@@ -1980,6 +1980,34 @@ def main():
     supabase_url = st.sidebar.text_input("🗄️ Supabase URL", help="Your Supabase project URL")
     supabase_key = st.sidebar.text_input("🔐 Supabase Key", type="password", help="Your Supabase anon key")
     
+    # WordPress Authentication
+    st.sidebar.markdown("### 🔐 WordPress Auth")
+    wp_username = st.sidebar.text_input("👤 WordPress Username", help="Your WordPress username")
+    wp_password = st.sidebar.text_input("🔑 WordPress Password", type="password", help="Your WordPress password")
+    
+    # Quick login button if credentials are entered
+    if wp_username and wp_password and not st.session_state.authenticated:
+        if st.sidebar.button("🚀 Quick Login", type="primary"):
+            wp_auth = WordPressAuthManager()
+            with st.spinner("Authenticating..."):
+                valid, result = wp_auth.check_subscription(wp_username, wp_password)
+                if valid:
+                    st.session_state.authenticated = True
+                    st.session_state.user_data = result
+                    st.session_state.username = wp_username
+                    st.session_state.password = wp_password
+                    
+                    # Set usage limits based on role
+                    if result.get("role") == "admin":
+                        st.session_state.max_usage = 1000
+                    else:
+                        st.session_state.max_usage = 100
+                    
+                    st.success(f"✅ Logged in as {wp_username}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ Login failed: {result.get('error', 'Unknown error')}")
+    
     # Debug mode
     debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show detailed API response info")
     
@@ -2071,4 +2099,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
