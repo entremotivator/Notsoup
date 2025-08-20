@@ -31,7 +31,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Dict, Any, Optional, List, Tuple
 import time
-from gotrue.errors import AuthApiError
+from supabase_auth import AuthApiError
 import io
 import base64
 from PIL import Image
