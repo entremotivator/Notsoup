@@ -1,3 +1,5 @@
 supabase
 plotly
 gotrue
+requests
+pandas
