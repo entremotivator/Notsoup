@@ -8,4 +8,4 @@ streamlit_folium
 seaborn
 scipy
 supabase-auth
-jwt
+PyJWT
