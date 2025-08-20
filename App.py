@@ -948,3 +948,169 @@ def main():
         st.info("""
         **Setup Instructions:**
         Add the following to your Streamlit secrets:
+        
+        \`\`\`toml
+        RENTCAST_API_KEY = "your_rentcast_api_key"
+        SUPABASE_URL = "your_supabase_url"
+        SUPABASE_KEY = "your_supabase_anon_key"
+        \`\`\`
+        """)
+        st.stop()
+    
+    # Initialize managers
+    rentcast_api = RentCastAPI(api_key)
+    supabase_manager = SupabaseManager(supabase_url, supabase_key)
+    
+    # Check authentication
+    if not st.session_state.authenticated:
+        render_auth_page(supabase_manager)
+        return
+    
+    user = st.session_state.user
+    
+    # Sidebar navigation
+    with st.sidebar:
+        st.markdown("### 🏠 Navigation")
+        
+        if st.button("📊 Dashboard", use_container_width=True):
+            st.session_state.current_page = "dashboard"
+        
+        if st.button("🔍 Property Search", use_container_width=True):
+            st.session_state.current_page = "search"
+        
+        st.markdown("---")
+        
+        # User info
+        st.markdown(f"**👤 Logged in as:**")
+        st.markdown(f"{user.email}")
+        
+        # Usage info
+        current_usage = supabase_manager.get_user_usage(user.id)
+        remaining = 100 - current_usage
+        
+        st.markdown(f"**📊 API Usage:**")
+        st.progress(current_usage / 100)
+        st.markdown(f"{current_usage}/100 searches used")
+        st.markdown(f"{remaining} searches remaining")
+        
+        st.markdown("---")
+        
+        if st.button("🚪 Sign Out", use_container_width=True):
+            supabase_manager.sign_out()
+            st.session_state.authenticated = False
+            st.session_state.user = None
+            st.rerun()
+    
+    # Main content based on current page
+    if st.session_state.current_page == "dashboard":
+        render_enhanced_dashboard(user, supabase_manager)
+    
+    elif st.session_state.current_page == "search":
+        st.markdown('<h1 class="main-header">🔍 Property Analysis</h1>', unsafe_allow_html=True)
+        
+        # Check usage limit
+        current_usage = supabase_manager.get_user_usage(user.id)
+        if current_usage >= 100:
+            st.error("You have reached your monthly search limit of 100 searches. Please try again next month.")
+            return
+        
+        # Property search form
+        with st.form("property_search"):
+            st.markdown("### Enter Property Address")
+            address = st.text_input(
+                "🏠 Property Address",
+                placeholder="e.g., 123 Main St, City, State 12345",
+                help="Enter the full address including city and state for best results"
+            )
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                search_button = st.form_submit_button("🔍 Analyze Property", type="primary", use_container_width=True)
+            with col2:
+                include_calculator = st.checkbox("Include Investment Calculator", value=True)
+        
+        if search_button and address:
+            if not supabase_manager.increment_usage(user.id):
+                st.error("Unable to process search. Usage limit may have been reached.")
+                return
+            
+            with st.spinner("🔍 Searching property data..."):
+                # Get property data
+                property_data = rentcast_api.search_properties(address)
+                
+                if not property_data:
+                    st.error("No property data found for this address. Please check the address and try again.")
+                    return
+                
+                # Get rent estimate
+                rent_estimate = rentcast_api.get_rent_estimate(address)
+                
+                # Display property information
+                display_property_card(property_data, rent_estimate)
+                
+                # Market analysis
+                display_market_analysis(property_data, rentcast_api)
+                
+                # Investment calculator
+                analysis_data = None
+                if include_calculator:
+                    analysis_data = display_investment_calculator(property_data, rent_estimate)
+                
+                # Export options
+                st.markdown("### 📤 Export Options")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # JSON export
+                    export_data = {
+                        "property_data": property_data,
+                        "rent_estimate": rent_estimate,
+                        "analysis_data": analysis_data,
+                        "search_date": datetime.now().isoformat()
+                    }
+                    
+                    json_str = json.dumps(export_data, indent=2, default=str)
+                    st.download_button(
+                        label="📄 Download JSON",
+                        data=json_str,
+                        file_name=f"property_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+                
+                with col2:
+                    # CSV export
+                    csv_data = {
+                        "Address": [property_data.get("formattedAddress", "")],
+                        "Property Type": [property_data.get("propertyType", "")],
+                        "Bedrooms": [property_data.get("bedrooms", "")],
+                        "Bathrooms": [property_data.get("bathrooms", "")],
+                        "Square Feet": [property_data.get("squareFootage", "")],
+                        "Year Built": [property_data.get("yearBuilt", "")],
+                        "Last Sale Price": [property_data.get("lastSalePrice", "")],
+                        "Estimated Rent": [rent_estimate.get("rent", "") if rent_estimate else ""]
+                    }
+                    
+                    if analysis_data:
+                        csv_data.update({
+                            "Monthly Cash Flow": [analysis_data.get("monthly_cash_flow", "")],
+                            "Cap Rate": [analysis_data.get("cap_rate", "")],
+                            "Cash-on-Cash Return": [analysis_data.get("cash_on_cash_return", "")]
+                        })
+                    
+                    df_export = pd.DataFrame(csv_data)
+                    csv_string = df_export.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="📊 Download CSV",
+                        data=csv_string,
+                        file_name=f"property_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                
+                # Save to database
+                supabase_manager.save_property_data(user.id, property_data, analysis_data)
+                
+                st.success("✅ Property analysis completed and saved to your dashboard!")
+
+if __name__ == "__main__":
+    main()
