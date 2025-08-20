@@ -7,3 +7,4 @@ folium
 streamlit_folium
 seaborn
 scipy
+supabase-auth
