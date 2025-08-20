@@ -945,16 +945,18 @@ def main():
         supabase_key = st.secrets["SUPABASE_KEY"]
     except KeyError as e:
         st.error(f"Missing configuration: {e}")
-        st.info("""
-        **Setup Instructions:**
-        Add the following to your Streamlit secrets:
-        
-        \`\`\`toml
-        RENTCAST_API_KEY = "your_rentcast_api_key"
-        SUPABASE_URL = "your_supabase_url"
-        SUPABASE_KEY = "your_supabase_anon_key"
-        \`\`\`
-        """)
+        st.info(
+            """
+            **Setup Instructions:**
+            Add the following to your Streamlit secrets (Secrets tab in Community Cloud, or `.streamlit/secrets.toml` locally):
+            
+            ```toml
+            RENTCAST_API_KEY = "your_rentcast_api_key"
+            SUPABASE_URL = "your_supabase_url"
+            SUPABASE_KEY = "your_supabase_anon_key"
+            ```
+            """
+        )
         st.stop()
     
     # Initialize managers
