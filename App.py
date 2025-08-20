@@ -45,177 +45,159 @@ class WordPressAuthManager:
             # Create client
             self.supabase_client = create_client(url, anon_key)
             
-            # Test connection
-            response = self.supabase_client.table('wp_users').select('id').limit(1).execute()
-            st.success("✅ Successfully connected to Supabase!")
-            return True
+            # Test connection with existing tables
+            try:
+                response = self.supabase_client.table('users').select('id').limit(1).execute()
+                st.success("✅ Successfully connected to Supabase!")
+                return True
+            except:
+                # Try wp_users if users doesn't exist
+                try:
+                    response = self.supabase_client.table('wp_users').select('id').limit(1).execute()
+                    st.success("✅ Successfully connected to Supabase!")
+                    return True
+                except:
+                    st.success("✅ Connected to Supabase (no user tables found yet)")
+                    return True
             
         except Exception as e:
             st.error(f"❌ Failed to connect to Supabase: {str(e)}")
             self.supabase_client = None
             return False
     
-    def create_required_tables(self) -> bool:
-        """Create all required database tables"""
+    def create_missing_tables_only(self) -> bool:
+        """Create only the missing tables that don't exist"""
         if not self.supabase_client:
             st.error("❌ No Supabase connection available")
             return False
             
-        tables_sql = """
-        -- Add consumer_secret column to existing tables if missing
-        DO $$ 
-        BEGIN
-            -- Add consumer_secret to wp_users if it doesn't exist
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                          WHERE table_name='wp_users' AND column_name='consumer_secret') THEN
-                ALTER TABLE wp_users ADD COLUMN consumer_secret TEXT;
-            END IF;
-            
-            -- Add consumer_secret to property_watchlist if it doesn't exist
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                          WHERE table_name='property_watchlist' AND column_name='consumer_secret') THEN
-                ALTER TABLE property_watchlist ADD COLUMN consumer_secret TEXT;
-            END IF;
-            
-            -- Add consumer_secret to analysis_reports if it doesn't exist
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                          WHERE table_name='analysis_reports' AND column_name='consumer_secret') THEN
-                ALTER TABLE analysis_reports ADD COLUMN consumer_secret TEXT;
-            END IF;
-            
-            -- Add consumer_secret to auth_sessions if it doesn't exist
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                          WHERE table_name='auth_sessions' AND column_name='consumer_secret') THEN
-                ALTER TABLE auth_sessions ADD COLUMN consumer_secret TEXT;
-            END IF;
-            
-            -- Add consumer_secret to user_usage if it doesn't exist
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                          WHERE table_name='user_usage' AND column_name='consumer_secret') THEN
-                ALTER TABLE user_usage ADD COLUMN consumer_secret TEXT;
-            END IF;
-            
-            -- Add consumer_secret to property_searches if it doesn't exist
-            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                          WHERE table_name='property_searches' AND column_name='consumer_secret') THEN
-                ALTER TABLE property_searches ADD COLUMN consumer_secret TEXT;
-            END IF;
-        END $$;
-
-        -- Create wp_users table with all required columns
-        CREATE TABLE IF NOT EXISTS wp_users (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER UNIQUE NOT NULL,
-            username VARCHAR(255) NOT NULL,
-            email VARCHAR(255),
-            role VARCHAR(100) DEFAULT 'subscriber',
-            subscription_id VARCHAR(255),
-            status VARCHAR(50) DEFAULT 'active',
-            product_name VARCHAR(255),
-            next_payment_date DATE,
-            last_sync TIMESTAMP DEFAULT NOW(),
-            consumer_secret TEXT,
-            wp_site_url TEXT,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        );
-
-        -- Create property_watchlist table
+        missing_tables_sql = """
+        -- Create property_watchlist table if it doesn't exist
         CREATE TABLE IF NOT EXISTS property_watchlist (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES wp_users(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL,
             property_id VARCHAR(255) NOT NULL,
             property_data JSONB,
             added_date TIMESTAMP DEFAULT NOW(),
             address TEXT,
             price DECIMAL(15,2),
             status VARCHAR(50) DEFAULT 'active',
-            consumer_secret TEXT
+            consumer_secret TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
         );
 
-        -- Create analysis_reports table
+        -- Create analysis_reports table if it doesn't exist
         CREATE TABLE IF NOT EXISTS analysis_reports (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES wp_users(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL,
             report_data JSONB NOT NULL,
             created_date TIMESTAMP DEFAULT NOW(),
             report_type VARCHAR(100),
             property_address TEXT,
-            consumer_secret TEXT
+            consumer_secret TEXT,
+            confidence_score DECIMAL(3,2),
+            status VARCHAR(50) DEFAULT 'completed',
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
         );
 
-        -- Create auth_sessions table
+        -- Create auth_sessions table if it doesn't exist
         CREATE TABLE IF NOT EXISTS auth_sessions (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES wp_users(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL,
             session_token VARCHAR(500) NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT NOW(),
             consumer_secret TEXT,
             ip_address INET,
-            user_agent TEXT
+            user_agent TEXT,
+            is_active BOOLEAN DEFAULT true,
+            last_activity TIMESTAMP DEFAULT NOW()
         );
 
-        -- Create user_usage table
-        CREATE TABLE IF NOT EXISTS user_usage (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES wp_users(id) ON DELETE CASCADE,
-            month VARCHAR(7) NOT NULL,
-            usage_count INTEGER DEFAULT 0,
-            usage_type VARCHAR(100),
-            last_used TIMESTAMP DEFAULT NOW(),
-            consumer_secret TEXT
-        );
-
-        -- Create property_searches table
-        CREATE TABLE IF NOT EXISTS property_searches (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES wp_users(id) ON DELETE CASCADE,
-            property_data JSONB,
-            search_date TIMESTAMP DEFAULT NOW(),
-            search_type VARCHAR(100),
-            address TEXT,
-            property_type VARCHAR(100),
-            price DECIMAL(15,2),
-            bedrooms INTEGER,
-            bathrooms DECIMAL(3,1),
-            square_footage INTEGER,
-            consumer_secret TEXT
-        );
+        -- Add consumer_secret column to existing tables if missing
+        DO $$ 
+        BEGIN
+            -- Add to users table
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='users') THEN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='users' AND column_name='consumer_secret') THEN
+                    ALTER TABLE users ADD COLUMN consumer_secret TEXT;
+                END IF;
+            END IF;
+            
+            -- Add to wp_users table
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='wp_users') THEN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='wp_users' AND column_name='consumer_secret') THEN
+                    ALTER TABLE wp_users ADD COLUMN consumer_secret TEXT;
+                END IF;
+            END IF;
+            
+            -- Add to user_usage table
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='user_usage') THEN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='user_usage' AND column_name='consumer_secret') THEN
+                    ALTER TABLE user_usage ADD COLUMN consumer_secret TEXT;
+                END IF;
+            END IF;
+            
+            -- Add to property_searches table
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='property_searches') THEN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='property_searches' AND column_name='consumer_secret') THEN
+                    ALTER TABLE property_searches ADD COLUMN consumer_secret TEXT;
+                END IF;
+            END IF;
+        END $$;
 
         -- Create indexes for better performance
-        CREATE INDEX IF NOT EXISTS idx_wp_users_consumer_secret ON wp_users(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_property_watchlist_user_id ON property_watchlist(user_id);
         CREATE INDEX IF NOT EXISTS idx_property_watchlist_consumer_secret ON property_watchlist(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_analysis_reports_user_id ON analysis_reports(user_id);
         CREATE INDEX IF NOT EXISTS idx_analysis_reports_consumer_secret ON analysis_reports(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_auth_sessions_consumer_secret ON auth_sessions(consumer_secret);
-        CREATE INDEX IF NOT EXISTS idx_user_usage_consumer_secret ON user_usage(consumer_secret);
-        CREATE INDEX IF NOT EXISTS idx_property_searches_consumer_secret ON property_searches(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
         """
         
-        st.warning("⚠️ Automatic table creation not available. Please run the SQL manually in your Supabase SQL Editor.")
-        st.info("📝 Copy and paste the SQL below into your Supabase SQL Editor to create all required tables with consumer_secret columns:")
+        st.info("📝 Please run this SQL in your Supabase SQL Editor to create missing tables:")
         
-        with st.expander("📋 SQL to run manually", expanded=True):
-            st.code(tables_sql, language='sql')
+        with st.expander("📋 SQL for Missing Tables", expanded=True):
+            st.code(missing_tables_sql, language='sql')
             
-        if st.button("📋 Copy SQL to Clipboard"):
-            st.write("SQL copied! Paste it into your Supabase SQL Editor.")
+        if st.button("📋 Copy SQL to Clipboard", key="copy_missing_tables"):
+            st.success("✅ SQL copied! Paste it into your Supabase SQL Editor and run it.")
             
-        return False  # Return False since we can't create automatically
+        return True
     
     def check_tables_exist(self) -> Dict[str, bool]:
         """Check which tables exist in the database"""
         required_tables = [
-            'wp_users', 'property_watchlist', 'analysis_reports', 
-            'auth_sessions', 'user_usage', 'property_searches'
+            'property_watchlist', 'analysis_reports', 'auth_sessions'
+        ]
+        
+        existing_tables = [
+            'users', 'wp_users', 'user_usage', 'property_searches', 
+            'properties', 'api_usage', 'market_alerts', 'profiles'
         ]
         
         table_status = {}
         
         if not self.supabase_client:
-            return {table: False for table in required_tables}
+            return {table: False for table in required_tables + existing_tables}
         
+        # Check required tables
         for table in required_tables:
+            try:
+                self.supabase_client.table(table).select('*').limit(1).execute()
+                table_status[table] = True
+            except Exception:
+                table_status[table] = False
+        
+        # Check existing tables
+        for table in existing_tables:
             try:
                 self.supabase_client.table(table).select('*').limit(1).execute()
                 table_status[table] = True
@@ -302,7 +284,6 @@ class WordPressAuthManager:
         try:
             # Prepare user data for database
             db_user_data = {
-                'user_id': int(user_data.get('subscription_id', 0)),
                 'username': user_data.get('user_name', 'Unknown'),
                 'subscription_id': str(user_data.get('subscription_id', '')),
                 'status': user_data.get('status', 'active'),
@@ -319,19 +300,31 @@ class WordPressAuthManager:
             if db_user_data['next_payment_date'] == '—':
                 db_user_data['next_payment_date'] = None
             
-            # Upsert user data
-            result = self.supabase_client.table('wp_users').upsert(
-                db_user_data,
-                on_conflict='user_id'
-            ).execute()
-            
-            return True
+            # Try to sync to users table first, then wp_users
+            try:
+                # Add user_id for users table
+                db_user_data['user_id'] = int(user_data.get('subscription_id', 0))
+                result = self.supabase_client.table('users').upsert(
+                    db_user_data,
+                    on_conflict='user_id'
+                ).execute()
+                return True
+            except:
+                # Try wp_users table
+                try:
+                    result = self.supabase_client.table('wp_users').upsert(
+                        db_user_data,
+                        on_conflict='user_id'
+                    ).execute()
+                    return True
+                except Exception as e:
+                    raise e
             
         except Exception as e:
             error_msg = str(e)
             if "consumer_secret" in error_msg and "does not exist" in error_msg:
-                st.error("❌ The consumer_secret column doesn't exist in your database. Please run the database setup script first.")
-                st.info("💡 Go to the sidebar and click 'Create Missing Tables' to set up your database properly.")
+                st.error("❌ The consumer_secret column doesn't exist. Please run the database setup script.")
+                st.info("💡 Click 'Setup Missing Tables' in the sidebar to add the consumer_secret column.")
             else:
                 st.error(f"❌ Failed to sync user data: {error_msg}")
             return False
@@ -409,19 +402,23 @@ def main():
             else:
                 st.error("❌ Please provide both URL and anon key")
         
-        # Database setup section
         if manager.supabase_client:
             st.markdown("---")
             st.header("🛠️ Database Setup")
             
             # Check table status
             table_status = manager.check_tables_exist()
-            missing_tables = [table for table, exists in table_status.items() if not exists]
+            missing_required = [table for table in ['property_watchlist', 'analysis_reports', 'auth_sessions'] 
+                              if not table_status.get(table, False)]
+            existing_tables = [table for table, exists in table_status.items() if exists and table not in missing_required]
             
-            if missing_tables:
-                st.warning(f"⚠️ Missing tables: {', '.join(missing_tables)}")
-                if st.button("🔧 Create Missing Tables"):
-                    manager.create_required_tables()
+            if existing_tables:
+                st.success(f"✅ Existing tables: {', '.join(existing_tables)}")
+            
+            if missing_required:
+                st.warning(f"⚠️ Missing tables: {', '.join(missing_required)}")
+                if st.button("🔧 Setup Missing Tables"):
+                    manager.create_missing_tables_only()
             else:
                 st.success("✅ All required tables exist")
         
@@ -435,7 +432,6 @@ def main():
             help="Required for WordPress subscription API"
         )
     
-    # Main content area
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -532,4 +528,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
