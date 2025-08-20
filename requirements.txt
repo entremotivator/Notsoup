@@ -9,4 +9,3 @@ seaborn
 scipy
 Pillow
 hashlib2
-python-dateutil
