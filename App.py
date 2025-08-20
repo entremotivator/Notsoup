@@ -26,7 +26,6 @@ import numpy as np
 from datetime import datetime, timedelta, date
 import hashlib
 from supabase import create_client, Client
-from gotrue.errors import AuthApiError
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -41,12 +40,15 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 import warnings
+from supabase.lib.client_options import ClientOptions
+from gotrue.errors import AuthApiError
+
 warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
-    page_title="WordPress Auth Manager",
-    page_icon="🔐",
+    page_title="Enhanced RentCast Real Estate Analytics Platform",
+    page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -348,19 +350,42 @@ class SupabaseManager:
     """Enhanced Supabase manager for comprehensive data management"""
     
     def __init__(self, url: str, key: str):
+        self.client = None
+        self.connection_status = False
+        
         try:
+            if not url or not key:
+                st.warning("⚠️ Supabase URL and Anon Key are required for database functionality")
+                return
+                
             self.client: Client = create_client(url, key)
+            
+            # Test connection with better error handling
             test_response = self.client.table("wp_users").select("count", count="exact").limit(1).execute()
+            self.connection_status = True
             st.success("✅ Supabase connection established successfully!")
+            
         except Exception as e:
-            st.error(f"Failed to initialize Supabase client: {str(e)}")
-            # Create a mock client to prevent crashes
+            error_msg = str(e)
+            if "Invalid API key" in error_msg:
+                st.error("❌ Invalid Supabase API key. Please check your credentials.")
+            elif "not found" in error_msg.lower():
+                st.error("❌ Supabase project not found. Please check your URL.")
+            else:
+                st.error(f"❌ Failed to connect to Supabase: {error_msg}")
+            
+            st.info("💡 Configure Supabase in the sidebar to enable database features")
             self.client = None
+            self.connection_status = False
+    
+    def is_connected(self) -> bool:
+        """Check if Supabase client is properly connected"""
+        return self.client is not None and self.connection_status
     
     def sign_in(self, email: str, password: str) -> Dict[str, Any]:
-        """Sign in existing user with proper error handling"""
-        if not self.client:
-            return {"success": False, "error": "Supabase client not initialized"}
+        """Sign in existing user with improved error handling"""
+        if not self.is_connected():
+            return {"success": False, "error": "Supabase client not connected"}
         
         try:
             response = self.client.auth.sign_in_with_password({
@@ -375,7 +400,7 @@ class SupabaseManager:
     
     def sign_out(self) -> bool:
         """Sign out current user"""
-        if not self.client:
+        if not self.is_connected():
             return False
         
         try:
@@ -387,7 +412,7 @@ class SupabaseManager:
     
     def get_current_user(self):
         """Get current authenticated user"""
-        if not self.client:
+        if not self.is_connected():
             return None
         
         try:
@@ -397,9 +422,9 @@ class SupabaseManager:
             return None
     
     def reset_password(self, email: str) -> Dict[str, Any]:
-        """Send password reset email"""
-        if not self.client:
-            return {"success": False, "error": "Supabase client not initialized"}
+        """Send password reset email with corrected method name"""
+        if not self.is_connected():
+            return {"success": False, "error": "Supabase client not connected"}
         
         try:
             self.client.auth.reset_password_for_email(email)
@@ -410,31 +435,39 @@ class SupabaseManager:
             return {"success": False, "error": str(e)}
 
     def create_tables_if_not_exist(self):
-        """Create necessary tables if they don't exist"""
-        if not self.client:
+        """Create necessary tables if they don't exist with better feedback"""
+        if not self.is_connected():
+            st.warning("⚠️ Cannot check database tables - Supabase not connected")
             return False
         
         try:
-            # Check if tables exist by trying to query them
             tables_to_check = [
                 "wp_users", "user_usage", "property_searches", 
                 "property_watchlist", "analysis_reports", "auth_sessions"
             ]
             
+            missing_tables = []
             for table in tables_to_check:
                 try:
                     self.client.table(table).select("*").limit(1).execute()
                 except Exception:
-                    st.warning(f"Table '{table}' may not exist. Please run the database setup script.")
+                    missing_tables.append(table)
             
-            return True
+            if missing_tables:
+                st.warning(f"⚠️ Missing tables: {', '.join(missing_tables)}. Please run the database setup script.")
+                return False
+            else:
+                st.success("✅ All required database tables exist")
+                return True
+                
         except Exception as e:
-            st.error(f"Database check failed: {str(e)}")
+            st.error(f"❌ Database check failed: {str(e)}")
             return False
     
     def get_user_usage(self, user_id: str) -> int:
-        """Get current month's API usage"""
-        if not self.client:
+        """Get current month's API usage with better error handling"""
+        if not self.is_connected():
+            st.warning("⚠️ Cannot track usage - database not connected")
             return 0
         
         current_month = datetime.now().strftime("%Y-%m")
@@ -445,19 +478,24 @@ class SupabaseManager:
             if result.data:
                 return result.data[0]["usage_count"]
             else:
-                self.client.table("user_usage").insert({
-                    "user_id": user_id,
-                    "month": current_month,
-                    "usage_count": 0
-                }).execute()
+                try:
+                    self.client.table("user_usage").insert({
+                        "user_id": user_id,
+                        "month": current_month,
+                        "usage_count": 0,
+                        "usage_type": "search",
+                        "last_used": datetime.now().isoformat()
+                    }).execute()
+                except Exception as insert_error:
+                    st.warning(f"Could not initialize usage tracking: {str(insert_error)}")
                 return 0
         except Exception as e:
-            st.error(f"Database error: {str(e)}")
+            st.warning(f"Usage tracking unavailable: {str(e)}")
             return 0
     
     def increment_usage(self, user_id: str, usage_type: str = "search") -> bool:
-        """Increment user's API usage count"""
-        if not self.client:
+        """Increment user's API usage count with improved error handling"""
+        if not self.is_connected():
             return False
         
         current_month = datetime.now().strftime("%Y-%m")
@@ -485,11 +523,15 @@ class SupabaseManager:
             
             return True
         except Exception as e:
-            st.error(f"Failed to update usage: {str(e)}")
+            st.warning(f"Could not update usage tracking: {str(e)}")
             return False
     
     def save_property_data(self, user_id: str, property_data: Dict[str, Any], search_type: str = "basic"):
-        """Save comprehensive property data"""
+        """Save comprehensive property data with better error handling"""
+        if not self.is_connected():
+            st.info("💾 Property data not saved - database not connected")
+            return
+            
         try:
             self.client.table("property_searches").insert({
                 "user_id": user_id,
@@ -504,19 +546,26 @@ class SupabaseManager:
                 "square_footage": property_data.get("squareFootage")
             }).execute()
         except Exception as e:
-            st.error(f"Failed to save data: {str(e)}")
+            st.warning(f"Could not save property data: {str(e)}")
     
     def get_user_searches(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get user's recent property searches"""
+        """Get user's recent property searches with error handling"""
+        if not self.is_connected():
+            return []
+            
         try:
             result = self.client.table("property_searches").select("*").eq("user_id", user_id).order("search_date", desc=True).limit(limit).execute()
             return result.data if result.data else []
         except Exception as e:
-            st.error(f"Failed to fetch search history: {str(e)}")
+            st.warning(f"Could not fetch search history: {str(e)}")
             return []
     
     def save_to_watchlist(self, user_id: str, property_data: Dict[str, Any]) -> bool:
-        """Add property to user's watchlist"""
+        """Add property to user's watchlist with error handling"""
+        if not self.is_connected():
+            st.info("💾 Cannot save to watchlist - database not connected")
+            return False
+            
         try:
             property_id = property_data.get("id") or hashlib.md5(
                 property_data.get("formattedAddress", "").encode()
@@ -533,20 +582,27 @@ class SupabaseManager:
             }).execute()
             return True
         except Exception as e:
-            st.error(f"Failed to add to watchlist: {str(e)}")
+            st.warning(f"Could not add to watchlist: {str(e)}")
             return False
     
     def get_watchlist(self, user_id: str) -> List[Dict[str, Any]]:
-        """Get user's property watchlist"""
+        """Get user's property watchlist with error handling"""
+        if not self.is_connected():
+            return []
+            
         try:
             result = self.client.table("property_watchlist").select("*").eq("user_id", user_id).eq("status", "active").order("added_date", desc=True).execute()
             return result.data if result.data else []
         except Exception as e:
-            st.error(f"Failed to fetch watchlist: {str(e)}")
+            st.warning(f"Could not fetch watchlist: {str(e)}")
             return []
     
     def save_analysis_report(self, user_id: str, report_data: Dict[str, Any]) -> bool:
-        """Save property analysis report"""
+        """Save property analysis report with error handling"""
+        if not self.is_connected():
+            st.info("💾 Cannot save analysis report - database not connected")
+            return False
+            
         try:
             self.client.table("analysis_reports").insert({
                 "user_id": user_id,
@@ -557,7 +613,7 @@ class SupabaseManager:
             }).execute()
             return True
         except Exception as e:
-            st.error(f"Failed to save report: {str(e)}")
+            st.warning(f"Could not save analysis report: {str(e)}")
             return False
 
 class PropertyAnalyzer:
@@ -2063,7 +2119,7 @@ def format_number(number: Optional[int]) -> str:
     return f"{number:,}"
 
 def main():
-    """Enhanced main application with full Supabase integration"""
+    """Enhanced main application with robust Supabase integration"""
     st.set_page_config(
         page_title="WordPress Auth Manager",
         page_icon="🔐",
@@ -2074,7 +2130,6 @@ def main():
     with st.sidebar:
         st.markdown("### 🔧 Supabase Configuration")
         
-        # Supabase connection settings
         supabase_url = st.text_input(
             "Supabase URL", 
             value=st.session_state.get("supabase_url", ""),
@@ -2107,15 +2162,21 @@ def main():
         if consumer_secret:
             st.session_state.consumer_secret = consumer_secret
         
-        # Connection test button
         if st.button("🔗 Test Supabase Connection"):
             if supabase_url and supabase_anon_key:
-                try:
-                    test_client = create_client(supabase_url, supabase_anon_key)
-                    test_client.table("wp_users").select("count", count="exact").limit(1).execute()
-                    st.success("✅ Connection successful!")
-                except Exception as e:
-                    st.error(f"❌ Connection failed: {str(e)}")
+                with st.spinner("Testing connection..."):
+                    try:
+                        test_client = create_client(supabase_url, supabase_anon_key)
+                        test_client.table("wp_users").select("count", count="exact").limit(1).execute()
+                        st.success("✅ Connection successful!")
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "Invalid API key" in error_msg:
+                            st.error("❌ Invalid API key")
+                        elif "not found" in error_msg.lower():
+                            st.error("❌ Project not found")
+                        else:
+                            st.error(f"❌ Connection failed: {error_msg}")
             else:
                 st.warning("Please enter both URL and Anon Key")
         
@@ -2127,7 +2188,6 @@ def main():
             else:
                 st.warning("Configure Supabase connection first")
     
-    # Initialize managers
     supabase_manager = None
     if st.session_state.get("supabase_url") and st.session_state.get("supabase_anon_key"):
         supabase_manager = SupabaseManager(
@@ -2135,7 +2195,7 @@ def main():
             st.session_state.supabase_anon_key
         )
         
-        if supabase_manager.client:
+        if supabase_manager.is_connected():
             supabase_manager.create_tables_if_not_exist()
     
     wp_auth = WordPressAuthManager()
@@ -2158,30 +2218,43 @@ def main():
         
         with col3:
             if st.button("🚪 Sign Out"):
-                # Clear session state
                 for key in list(st.session_state.keys()):
                     if key.startswith(('authenticated', 'user_data', 'username', 'password')):
                         del st.session_state[key]
                 st.rerun()
         
-        if supabase_manager and supabase_manager.client:
+        if supabase_manager and supabase_manager.is_connected():
+            # Sync user data with Supabase
+            wp_auth.sync_user_data(supabase_manager, user_data)
             render_enhanced_dashboard(user_data, supabase_manager)
         else:
             st.warning("⚠️ Supabase not configured. Please configure Supabase in the sidebar to access full functionality.")
             st.info("You can still use WordPress authentication features.")
+            
+            # Show basic user info without database features
+            st.markdown("### 📋 User Information")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Username:** {user_data.get('user_name', 'N/A')}")
+                st.write(f"**Role:** {user_data.get('role', 'N/A')}")
+            with col2:
+                st.write(f"**Status:** {user_data.get('status', 'N/A')}")
+                st.write(f"**Product:** {user_data.get('product_name', 'N/A')}")
 
-# Utility functions
-def format_currency(amount: Optional[int]) -> str:
-    """Format currency values"""
-    if amount is None or amount == 0:
-        return "N/A"
-    return f"${amount:,}"
-
-def format_number(number: Optional[int]) -> str:
-    """Format numeric values"""
-    if number is None or number == 0:
-        return "N/A"
-    return f"{number:,}"
+    # Footer
+    st.markdown("---")
+    username = user_data.get("user_name", "User")
+    role = user_data.get("role", "subscriber")
+    product = user_data.get("product_name", "N/A")
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; margin-top: 2rem;">
+        <h3>🏠 Enhanced RentCast Real Estate Analytics Platform</h3>
+        <p>Built with ❤️ using Streamlit • Powered by RentCast API • WordPress Integration</p>
+        <p><strong>Logged in as:</strong> {username} ({role}) • <strong>Subscription:</strong> {product}</p>
+        <p><em>Your comprehensive real estate investment analysis solution</em></p>
+    </div>
+    """, unsafe_allow_html=True)
 
 def apply_custom_css():
     """Apply custom CSS styling"""
@@ -2200,7 +2273,7 @@ def apply_custom_css():
     
     .sub-header {
         font-size: 1.5rem;
-        font-weight: bold;
+        font-weight: 600;
         color: #2c3e50;
         margin: 1rem 0;
         padding: 0.5rem 0;
