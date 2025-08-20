@@ -365,7 +365,53 @@ def display_property_overview(property_data: Dict[str, Any]):
     
     with col4:
         st.metric("Last Sale Price", format_currency(property_data.get("lastSalePrice")))
-        st.metric("Last Sale Date", property_data.get("lastSaleDate", "N/A")[:10] if property_data.get("lastSaleDate") else "N/A")
+        last_sale_date = property_data.get("lastSaleDate")
+        if last_sale_date:
+            # Parse ISO date string and format it nicely
+            try:
+                date_obj = datetime.fromisoformat(last_sale_date.replace("Z", "+00:00"))
+                formatted_date = date_obj.strftime("%Y-%m-%d")
+            except:
+                formatted_date = last_sale_date[:10] if len(last_sale_date) >= 10 else last_sale_date
+        else:
+            formatted_date = "N/A"
+        st.metric("Last Sale Date", formatted_date)
+    
+    # Additional property details in a second row
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("County", property_data.get("county", "N/A"))
+        st.metric("Zoning", property_data.get("zoning", "N/A"))
+    
+    with col2:
+        hoa_fee = property_data.get("hoa", {}).get("fee")
+        st.metric("HOA Fee (Monthly)", format_currency(hoa_fee) if hoa_fee else "None")
+        st.metric("Owner Occupied", "Yes" if property_data.get("ownerOccupied") else "No")
+    
+    with col3:
+        st.metric("Assessor ID", property_data.get("assessorID", "N/A"))
+        st.metric("Subdivision", property_data.get("subdivision", "N/A"))
+    
+    with col4:
+        # Get latest tax assessment and property tax
+        tax_assessments = property_data.get("taxAssessments", {})
+        property_taxes = property_data.get("propertyTaxes", {})
+        
+        latest_assessment = "N/A"
+        latest_tax = "N/A"
+        
+        if tax_assessments:
+            latest_year = max(tax_assessments.keys())
+            latest_assessment = format_currency(tax_assessments[latest_year].get("value"))
+        
+        if property_taxes:
+            latest_year = max(property_taxes.keys())
+            latest_tax = format_currency(property_taxes[latest_year].get("total"))
+        
+        st.metric("Latest Assessment", latest_assessment)
+        st.metric("Latest Property Tax", latest_tax)
 
 def display_property_features(features: Dict[str, Any]):
     """Display property features section"""
@@ -411,33 +457,66 @@ def display_tax_information(property_data: Dict[str, Any]):
     
     st.subheader("💰 Tax Information")
     
-    if tax_assessments:
-        st.write("**Tax Assessments:**")
-        assessment_data = []
-        for year, data in tax_assessments.items():
-            assessment_data.append({
-                "Year": year,
-                "Total Assessment": format_currency(data.get("value")),
-                "Land Value": format_currency(data.get("land")),
-                "Improvements": format_currency(data.get("improvements"))
-            })
-        
-        if assessment_data:
-            df_assessments = pd.DataFrame(assessment_data)
-            st.dataframe(df_assessments, use_container_width=True)
+    # Create two columns for assessments and taxes
+    col1, col2 = st.columns(2)
     
-    if property_taxes:
-        st.write("**Property Taxes:**")
-        tax_data = []
-        for year, data in property_taxes.items():
-            tax_data.append({
-                "Year": year,
-                "Total Tax": format_currency(data.get("total"))
-            })
-        
-        if tax_data:
-            df_taxes = pd.DataFrame(tax_data)
-            st.dataframe(df_taxes, use_container_width=True)
+    with col1:
+        if tax_assessments:
+            st.write("**Tax Assessments by Year:**")
+            assessment_data = []
+            for year, data in sorted(tax_assessments.items()):
+                assessment_data.append({
+                    "Year": year,
+                    "Total Assessment": format_currency(data.get("value")),
+                    "Land Value": format_currency(data.get("land")),
+                    "Improvements": format_currency(data.get("improvements"))
+                })
+            
+            if assessment_data:
+                df_assessments = pd.DataFrame(assessment_data)
+                st.dataframe(df_assessments, use_container_width=True)
+                
+                # Assessment trend chart
+                years = [int(year) for year in tax_assessments.keys()]
+                values = [data.get("value", 0) for data in tax_assessments.values()]
+                
+                if len(years) > 1:
+                    fig = px.line(x=years, y=values, title="Property Assessment Over Time", markers=True)
+                    fig.update_layout(
+                        xaxis_title="Year",
+                        yaxis_title="Assessment Value ($)",
+                        yaxis=dict(tickformat="$,.0f")
+                    )
+                    fig.update_traces(line=dict(width=3), marker=dict(size=6))
+                    st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        if property_taxes:
+            st.write("**Property Taxes by Year:**")
+            tax_data = []
+            for year, data in sorted(property_taxes.items()):
+                tax_data.append({
+                    "Year": year,
+                    "Total Tax": format_currency(data.get("total"))
+                })
+            
+            if tax_data:
+                df_taxes = pd.DataFrame(tax_data)
+                st.dataframe(df_taxes, use_container_width=True)
+                
+                # Tax trend chart
+                years = [int(year) for year in property_taxes.keys()]
+                taxes = [data.get("total", 0) for data in property_taxes.values()]
+                
+                if len(years) > 1:
+                    fig = px.line(x=years, y=taxes, title="Property Taxes Over Time", markers=True)
+                    fig.update_layout(
+                        xaxis_title="Year",
+                        yaxis_title="Tax Amount ($)",
+                        yaxis=dict(tickformat="$,.0f")
+                    )
+                    fig.update_traces(line=dict(width=3), marker=dict(size=6))
+                    st.plotly_chart(fig, use_container_width=True)
 
 def display_property_history(history: Dict[str, Any]):
     """Display property sale history"""
@@ -447,22 +526,45 @@ def display_property_history(history: Dict[str, Any]):
     st.subheader("📈 Property History")
     
     history_data = []
+    prices_for_chart = []
+    dates_for_chart = []
+    
     for date, data in history.items():
+        formatted_price = format_currency(data.get("price"))
         history_data.append({
             "Date": date,
             "Event": data.get("event", "N/A"),
-            "Price": format_currency(data.get("price"))
+            "Price": formatted_price
         })
+        
+        # Store numeric values for chart
+        if data.get("price"):
+            prices_for_chart.append(data.get("price"))
+            dates_for_chart.append(date)
     
     if history_data:
         df_history = pd.DataFrame(history_data)
         st.dataframe(df_history, use_container_width=True)
         
         # Create price trend chart if multiple sales
-        if len(history_data) > 1:
-            fig = px.line(df_history, x="Date", y=[int(str(row["Price"]).replace("$", "").replace(",", "")) for row in history_data],
-                         title="Property Value Over Time")
-            fig.update_layout(yaxis_title="Sale Price ($)")
+        if len(prices_for_chart) > 1:
+            # Create DataFrame for plotly
+            chart_df = pd.DataFrame({
+                "Date": dates_for_chart,
+                "Price": prices_for_chart
+            })
+            chart_df["Date"] = pd.to_datetime(chart_df["Date"])
+            chart_df = chart_df.sort_values("Date")
+            
+            fig = px.line(chart_df, x="Date", y="Price", 
+                         title="Property Value Over Time",
+                         markers=True)
+            fig.update_layout(
+                yaxis_title="Sale Price ($)",
+                xaxis_title="Date",
+                yaxis=dict(tickformat="$,.0f")
+            )
+            fig.update_traces(line=dict(width=3), marker=dict(size=8))
             st.plotly_chart(fig, use_container_width=True)
 
 def display_owner_information(owner_data: Dict[str, Any]):
@@ -620,14 +722,19 @@ def main():
                 st.error("No data found or API error occurred.")
                 return
             
-            properties = result.get("properties", [])
-            
-            if not properties:
+            # RentCast API returns an array of properties directly
+            if isinstance(result, list) and len(result) > 0:
+                property_data = result[0]  # Get the first (most relevant) property
+            elif isinstance(result, dict) and result.get("properties"):
+                # Fallback for different API response format
+                properties = result.get("properties", [])
+                if not properties:
+                    st.warning("No properties found for the given address.")
+                    return
+                property_data = properties[0]
+            else:
                 st.warning("No properties found for the given address.")
                 return
-            
-            # Display results for first property (most relevant)
-            property_data = properties[0]
             
             # Save to Supabase
             supabase_manager.save_property_data(user_id, property_data)
