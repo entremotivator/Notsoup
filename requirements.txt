@@ -3,3 +3,4 @@ plotly
 gotrue
 requests
 pandas
+folium
