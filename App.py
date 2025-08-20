@@ -62,7 +62,47 @@ class WordPressAuthManager:
             return False
             
         tables_sql = """
-        -- Create wp_users table
+        -- Add consumer_secret column to existing tables if missing
+        DO $$ 
+        BEGIN
+            -- Add consumer_secret to wp_users if it doesn't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='wp_users' AND column_name='consumer_secret') THEN
+                ALTER TABLE wp_users ADD COLUMN consumer_secret TEXT;
+            END IF;
+            
+            -- Add consumer_secret to property_watchlist if it doesn't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='property_watchlist' AND column_name='consumer_secret') THEN
+                ALTER TABLE property_watchlist ADD COLUMN consumer_secret TEXT;
+            END IF;
+            
+            -- Add consumer_secret to analysis_reports if it doesn't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='analysis_reports' AND column_name='consumer_secret') THEN
+                ALTER TABLE analysis_reports ADD COLUMN consumer_secret TEXT;
+            END IF;
+            
+            -- Add consumer_secret to auth_sessions if it doesn't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='auth_sessions' AND column_name='consumer_secret') THEN
+                ALTER TABLE auth_sessions ADD COLUMN consumer_secret TEXT;
+            END IF;
+            
+            -- Add consumer_secret to user_usage if it doesn't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='user_usage' AND column_name='consumer_secret') THEN
+                ALTER TABLE user_usage ADD COLUMN consumer_secret TEXT;
+            END IF;
+            
+            -- Add consumer_secret to property_searches if it doesn't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                          WHERE table_name='property_searches' AND column_name='consumer_secret') THEN
+                ALTER TABLE property_searches ADD COLUMN consumer_secret TEXT;
+            END IF;
+        END $$;
+
+        -- Create wp_users table with all required columns
         CREATE TABLE IF NOT EXISTS wp_users (
             id SERIAL PRIMARY KEY,
             user_id INTEGER UNIQUE NOT NULL,
@@ -142,19 +182,26 @@ class WordPressAuthManager:
             square_footage INTEGER,
             consumer_secret TEXT
         );
+
+        -- Create indexes for better performance
+        CREATE INDEX IF NOT EXISTS idx_wp_users_consumer_secret ON wp_users(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_property_watchlist_consumer_secret ON property_watchlist(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_analysis_reports_consumer_secret ON analysis_reports(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_consumer_secret ON auth_sessions(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_user_usage_consumer_secret ON user_usage(consumer_secret);
+        CREATE INDEX IF NOT EXISTS idx_property_searches_consumer_secret ON property_searches(consumer_secret);
         """
         
-        try:
-            # Execute table creation
-            self.supabase_client.rpc('exec_sql', {'sql': tables_sql}).execute()
-            st.success("✅ All database tables created successfully!")
-            return True
-        except Exception as e:
-            st.warning(f"⚠️ Could not create tables automatically: {str(e)}")
-            st.info("📝 Please run the SQL manually in your Supabase SQL Editor")
-            with st.expander("📋 SQL to run manually"):
-                st.code(tables_sql, language='sql')
-            return False
+        st.warning("⚠️ Automatic table creation not available. Please run the SQL manually in your Supabase SQL Editor.")
+        st.info("📝 Copy and paste the SQL below into your Supabase SQL Editor to create all required tables with consumer_secret columns:")
+        
+        with st.expander("📋 SQL to run manually", expanded=True):
+            st.code(tables_sql, language='sql')
+            
+        if st.button("📋 Copy SQL to Clipboard"):
+            st.write("SQL copied! Paste it into your Supabase SQL Editor.")
+            
+        return False  # Return False since we can't create automatically
     
     def check_tables_exist(self) -> Dict[str, bool]:
         """Check which tables exist in the database"""
@@ -261,10 +308,12 @@ class WordPressAuthManager:
                 'status': user_data.get('status', 'active'),
                 'product_name': user_data.get('product_name', ''),
                 'next_payment_date': user_data.get('next_payment_date'),
-                'consumer_secret': self.consumer_secret,
                 'wp_site_url': self.wp_base_url,
                 'last_sync': datetime.now().isoformat()
             }
+            
+            if self.consumer_secret:
+                db_user_data['consumer_secret'] = self.consumer_secret
             
             # Handle date conversion
             if db_user_data['next_payment_date'] == '—':
@@ -279,7 +328,12 @@ class WordPressAuthManager:
             return True
             
         except Exception as e:
-            st.error(f"❌ Failed to sync user data: {str(e)}")
+            error_msg = str(e)
+            if "consumer_secret" in error_msg and "does not exist" in error_msg:
+                st.error("❌ The consumer_secret column doesn't exist in your database. Please run the database setup script first.")
+                st.info("💡 Go to the sidebar and click 'Create Missing Tables' to set up your database properly.")
+            else:
+                st.error(f"❌ Failed to sync user data: {error_msg}")
             return False
     
     def get_user_stats(self, user_id: int) -> Dict[str, Any]:
@@ -478,3 +532,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
