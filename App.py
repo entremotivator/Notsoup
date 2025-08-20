@@ -357,6 +357,14 @@ class SupabaseManager:
             if not url or not key:
                 st.warning("⚠️ Supabase URL and Anon Key are required for database functionality")
                 return
+            
+            if not url.startswith(('http://', 'https://')):
+                st.error("❌ Invalid URL format. URL must start with http:// or https://")
+                return
+            
+            if not url.endswith('.supabase.co') and 'supabase' not in url:
+                st.error("❌ Invalid Supabase URL. Please use your project's Supabase URL")
+                return
                 
             self.client: Client = create_client(url, key)
             
@@ -369,8 +377,10 @@ class SupabaseManager:
             error_msg = str(e)
             if "Invalid API key" in error_msg:
                 st.error("❌ Invalid Supabase API key. Please check your credentials.")
-            elif "not found" in error_msg.lower():
-                st.error("❌ Supabase project not found. Please check your URL.")
+            elif "not found" in error_msg.lower() or "Invalid URL" in error_msg:
+                st.error("❌ Invalid Supabase URL. Please check your project URL format.")
+            elif "Failed to establish a new connection" in error_msg:
+                st.error("❌ Network connection failed. Please check your internet connection.")
             else:
                 st.error(f"❌ Failed to connect to Supabase: {error_msg}")
             
@@ -2134,7 +2144,7 @@ def main():
             "Supabase URL", 
             value=st.session_state.get("supabase_url", ""),
             placeholder="https://your-project.supabase.co",
-            help="Your Supabase project URL"
+            help="Your Supabase project URL (must start with https://)"
         )
         
         supabase_anon_key = st.text_input(
@@ -2164,19 +2174,26 @@ def main():
         
         if st.button("🔗 Test Supabase Connection"):
             if supabase_url and supabase_anon_key:
-                with st.spinner("Testing connection..."):
-                    try:
-                        test_client = create_client(supabase_url, supabase_anon_key)
-                        test_client.table("wp_users").select("count", count="exact").limit(1).execute()
-                        st.success("✅ Connection successful!")
-                    except Exception as e:
-                        error_msg = str(e)
-                        if "Invalid API key" in error_msg:
-                            st.error("❌ Invalid API key")
-                        elif "not found" in error_msg.lower():
-                            st.error("❌ Project not found")
-                        else:
-                            st.error(f"❌ Connection failed: {error_msg}")
+                if not supabase_url.startswith(('http://', 'https://')):
+                    st.error("❌ Invalid URL format. URL must start with http:// or https://")
+                elif not supabase_url.endswith('.supabase.co') and 'supabase' not in supabase_url:
+                    st.error("❌ Invalid Supabase URL. Please use your project's Supabase URL")
+                else:
+                    with st.spinner("Testing connection..."):
+                        try:
+                            test_client = create_client(supabase_url, supabase_anon_key)
+                            test_client.table("wp_users").select("count", count="exact").limit(1).execute()
+                            st.success("✅ Connection successful!")
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "Invalid API key" in error_msg:
+                                st.error("❌ Invalid API key")
+                            elif "not found" in error_msg.lower() or "Invalid URL" in error_msg:
+                                st.error("❌ Project not found or invalid URL")
+                            elif "Failed to establish a new connection" in error_msg:
+                                st.error("❌ Network connection failed")
+                            else:
+                                st.error(f"❌ Connection failed: {error_msg}")
             else:
                 st.warning("Please enter both URL and Anon Key")
         
