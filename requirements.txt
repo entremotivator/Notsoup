@@ -7,3 +7,6 @@ folium
 streamlit_folium
 seaborn
 scipy
+Pillow
+hashlib2
+python-dateutil
