@@ -4,3 +4,4 @@ gotrue
 requests
 pandas
 folium
+streamlit_folium
