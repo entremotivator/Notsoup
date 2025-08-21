@@ -9,3 +9,4 @@ seaborn
 scipy
 supabase-auth
 PyJWT==1.7.1
+psycopg2-binary
